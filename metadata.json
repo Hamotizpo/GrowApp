@@ -1,0 +1,6 @@
+{
+  "name": "GrowSafe",
+  "description": "A Firebase-connected web app.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
