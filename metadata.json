@@ -1,6 +1,6 @@
 {
   "name": "GrowSafe",
-  "description": "A Firebase-connected web app.",
+  "description": "Professional Grow Room Monitoring & IoT Automation Dashboard with PWA support.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }

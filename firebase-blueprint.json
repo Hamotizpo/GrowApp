@@ -1,0 +1,45 @@
+{
+  "entities": {
+    "Plant": {
+      "title": "Plant",
+      "description": "Represents a plant in the user's collection",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "The UID of the user who owns this plant" },
+        "species": { "type": "string", "description": "The species of the plant" },
+        "moisture": { "type": "number", "description": "Moisture percentage (0-100)" },
+        "sunlight": { "type": "string", "enum": ["Low Light", "Partial Shade", "Full Sun"] },
+        "status": { "type": "string", "enum": ["Stable", "Thirsty", "Critical"] },
+        "temp": { "type": "number" },
+        "imageUrl": { "type": "string" },
+        "createdAt": { "type": "number", "format": "timestamp" }
+      },
+      "required": ["userId", "species", "moisture", "sunlight", "status"]
+    },
+    "GrowthLog": {
+      "title": "Growth Log",
+      "description": "A log entry for a plant's growth",
+      "type": "object",
+      "properties": {
+        "plantId": { "type": "string", "description": "The ID of the plant this log belongs to" },
+        "userId": { "type": "string", "description": "The UID of the user who created this log" },
+        "date": { "type": "number", "format": "timestamp" },
+        "note": { "type": "string" },
+        "height": { "type": "number" },
+        "healthScore": { "type": "number" },
+        "imageUrl": { "type": "string" }
+      },
+      "required": ["plantId", "userId", "date", "note"]
+    }
+  },
+  "firestore": {
+    "/plants/{plantId}": {
+      "schema": "Plant",
+      "description": "User plants collection"
+    },
+    "/growth_logs/{logId}": {
+      "schema": "GrowthLog",
+      "description": "Plant growth logs collection"
+    }
+  }
+}

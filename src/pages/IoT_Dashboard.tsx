@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useIoTSync } from '../context/IoTSyncContext';
+import { renderLightPlanCanvas, buildLightSeries, convertPwmToIntensity, minutesFromClock } from '../lib/lightChartUtils';
 import { ResponsiveContainer, AreaChart, Area, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { motion } from 'framer-motion';
 import { Thermometer, Droplets, Sun, Wind, Power, Droplet, Flame, Target, Settings, Leaf } from 'lucide-react';
@@ -9,7 +10,10 @@ import PotModal from '../components/modals/PotModal';
 import AirActorsModal from '../components/modals/AirActorsModal';
 import LightModal from '../components/modals/LightModal';
 import ActorModal from '../components/modals/ActorModal';
-import { cn } from '../lib/utils';
+import LightIntensityChart from '../components/LightIntensityChart';
+import { cn, formatDurationMs } from '../lib/utils';
+
+// Helper component removed, using LightIntensityChart directly
 
 const renderBadge = (on: boolean, textOn: string = 'ON', textOff: string = 'OFF') => (
   <span className={cn(
@@ -88,6 +92,29 @@ export default function IoTDashboard() {
 
   const envData = envPoints === -1 ? (state.env || []) : (state.env || []).slice(-envPoints);
 
+  const whiteConfig = system?.config?.actors?.light_white || actors?.light_white?.settings || {};
+  const hasSoftStart = !!whiteConfig.softStartEnabled;
+  const softStartDurMs = Number(whiteConfig.softStartDuration) || 0;
+
+  const formatScheduleTime = (timeStr: string | number | undefined, addMs: number = 0) => {
+    if (timeStr === undefined || timeStr === null) return '--:--';
+    const str = timeStr.toString().padStart(4, '0');
+    if (str.length < 4) return '--:--';
+    let h = parseInt(str.slice(0, 2), 10);
+    let m = parseInt(str.slice(2), 10);
+    
+    if (isNaN(h) || isNaN(m)) return '--:--';
+
+    if (addMs > 0) {
+      const addMins = Math.floor(addMs / 60000);
+      const totalMins = h * 60 + m + addMins;
+      h = Math.floor(totalMins / 60) % 24;
+      m = totalMins % 60;
+    }
+
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+  };
+
   return (
     <div className="flex-1 p-4 md:p-8 z-10 flex flex-col h-full overflow-y-scroll overflow-x-hidden w-full max-w-7xl mx-auto custom-scrollbar">
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-6">
@@ -114,7 +141,7 @@ export default function IoTDashboard() {
             <div className="bg-black/20 rounded-xl p-3 border border-white/5">
               <span className="text-[10px] text-muted-color font-bold uppercase mb-1 block">Schedule</span>
               <span className="text-white font-semibold text-sm truncate block">
-                {(env.dayStartTime ?? env.dStart) ? `${(env.dayStartTime ?? env.dStart).toString().slice(0,2)}:${(env.dayStartTime ?? env.dStart).toString().slice(2)}` : '--:--'} - {(env.nightStartTime ?? env.nStart) ? `${(env.nightStartTime ?? env.nStart).toString().slice(0,2)}:${(env.nightStartTime ?? env.nStart).toString().slice(2)}` : '--:--'}
+                {formatScheduleTime(env.dayStartTime ?? env.dStart)} - {formatScheduleTime(env.nightStartTime ?? env.nStart, hasSoftStart ? softStartDurMs : 0)}
               </span>
             </div>
           </div>
@@ -122,7 +149,22 @@ export default function IoTDashboard() {
           <div className="flex flex-col gap-2 relative z-10">
             <div className="flex justify-between items-center bg-white/5 group-hover:bg-white/10 transition-colors p-2.5 rounded-xl border border-white/5">
               <span className="text-xs text-slate-300 font-medium flex items-center gap-2"><Power className="w-3.5 h-3.5 text-muted-color" /> Softstart</span>
-              {renderBadge(getActorState('light_white').ss, 'ACTIVE', 'INACTIVE')}
+              <div className="flex items-center gap-2">
+                {getActorState('light_white').ss && getActorState('light_white').ss_rem !== undefined && (
+                  <span className="text-[10px] font-mono text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 animate-pulse">
+                    {formatDurationMs(getActorState('light_white').ss_rem)}
+                  </span>
+                )}
+                {getActorState('light_white').ss ? (
+                  renderBadge(true, 'ACTIVE', '')
+                ) : hasSoftStart ? (
+                  <span className="px-2.5 py-[2px] text-[10px] font-bold rounded-full border transition-colors bg-blue-500/10 text-blue-400 border-blue-500/20">
+                    GESETZT
+                  </span>
+                ) : (
+                  renderBadge(false, '', 'INACTIVE')
+                )}
+              </div>
             </div>
             <div className="flex justify-between items-center bg-white/5 group-hover:bg-white/10 transition-colors p-2.5 rounded-xl border border-white/5">
               <span className="text-xs text-slate-300 font-medium flex items-center gap-2"><Sun className="w-3.5 h-3.5 text-amber-200" /> White</span>
@@ -141,86 +183,8 @@ export default function IoTDashboard() {
             </div>
           </div>
 
-          <div className="mt-6 flex-1 min-h-[120px] w-full bg-black/20 rounded-xl p-3 border border-white/5 overflow-hidden relative">
-            <ResponsiveContainer width="100%" height="100%">
-              {(() => {
-                const lightWhiteCfg = actors?.light_white?.settings || actors?.light_white || {};
-                const lightUV = actors?.light_uv?.settings || actors?.light_uv || {};
-                const lightIR = actors?.light_ir?.settings || actors?.light_ir || {};
-                const dStart = env.dayStartTime ?? env.dStart;
-                const startH = parseInt(dStart?.toString().slice(0, 2) || '6', 10);
-                const wDur = lightWhiteCfg?.duration ? Math.round(lightWhiteCfg.duration / 60) : 18;
-                const uvDur = lightUV?.duration ? Math.round(lightUV.duration / 60) : 4;
-                const irDur = lightIR?.duration ? Math.round(lightIR.duration / 60) : 18;
-
-                const endWhite = (startH + wDur) % 24;
-                const uvStart = (startH + Math.floor(wDur / 2) - Math.floor(uvDur / 2)) % 24;
-                const uvEnd = (uvStart + uvDur) % 24;
-
-                const inRange = (h: number, s: number, e: number) => {
-                  if (s < e) return h >= s && h <= e;
-                  return h >= s || h <= e;
-                };
-
-                const chartData = Array.from({ length: 25 }).map((_, i) => {
-                  const hour = i;
-                  let whiteVal = 0;
-                  if (inRange(hour, startH, endWhite)) {
-                    if (hour === startH) whiteVal = 0.5;
-                    else if (hour === endWhite) whiteVal = 0.5;
-                    else whiteVal = 1;
-                  }
-                  
-                  const uvVal = inRange(hour, uvStart, uvEnd) && uvDur > 0 ? 0.3 : 0;
-                  
-                  let irVal = 0;
-                  if (inRange(hour, startH, (startH + irDur) % 24) && irDur > 0) {
-                      irVal = 0.4;
-                  }
-
-                  return { hour, white: whiteVal, uv: uvVal, ir: irVal };
-                });
-
-                return (
-                  <AreaChart data={chartData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.02)" vertical={false} />
-                    <defs>
-                      <linearGradient id="colorWhiteDb" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#fbbf24" stopOpacity={0.5}/>
-                        <stop offset="95%" stopColor="#fbbf24" stopOpacity={0}/>
-                      </linearGradient>
-                      <linearGradient id="colorUVDb" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#a855f7" stopOpacity={0.5}/>
-                        <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
-                      </linearGradient>
-                      <linearGradient id="colorIRDb" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#ef4444" stopOpacity={0.5}/>
-                        <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <XAxis 
-                      dataKey="hour" 
-                      tickFormatter={(tick) => `${tick}h`} 
-                      stroke="rgba(255,255,255,0.2)"
-                      fontSize={9}
-                      tickMargin={8}
-                      interval="preserveStartEnd"
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis hide domain={[0, 1.2]} />
-                    <Tooltip 
-                      labelFormatter={(label) => `${label}:00`}
-                      contentStyle={{ backgroundColor: 'rgba(13,45,58,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '11px', backdropFilter: 'blur(8px)' }}
-                      itemStyle={{ padding: '2px 0' }}
-                    />
-                    <Area type="monotone" name="White" dataKey="white" stroke="#fbbf24" strokeWidth={2} fillOpacity={1} fill="url(#colorWhiteDb)" isAnimationActive={false} />
-                    <Area type="stepAfter" name="UV" dataKey="uv" stroke="#a855f7" strokeWidth={1.5} strokeDasharray="3 3" fillOpacity={1} fill="url(#colorUVDb)" isAnimationActive={false} />
-                    <Area type="stepAfter" name="IR" dataKey="ir" stroke="#ef4444" strokeWidth={1.5} strokeDasharray="3 3" fillOpacity={1} fill="url(#colorIRDb)" isAnimationActive={false} />
-                  </AreaChart>
-                );
-              })()}
-            </ResponsiveContainer>
+          <div className="mt-6 flex-1 min-h-[140px] w-full bg-black/20 rounded-xl p-2 border border-white/5 overflow-hidden relative">
+            <LightIntensityChart env={env} actors={actors} compact />
           </div>
         </Card>
 

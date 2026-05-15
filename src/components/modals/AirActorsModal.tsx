@@ -8,7 +8,7 @@ interface AirActorsModalProps {
 }
 
 export default function AirActorsModal({ isOpen, onClose }: AirActorsModalProps) {
-  const { state, sendCloudCommand } = useIoTSync();
+  const { state, sendCloudCommand, apiCall } = useIoTSync();
   const env = state.system?.envConfig || {};
   const sysMode = state.system?.mode || 'AUTO';
 
@@ -18,31 +18,40 @@ export default function AirActorsModal({ isOpen, onClose }: AirActorsModalProps)
   const [extHumidifierState, setExtHumidifierState] = useState(false);
   const [extHeaterState, setExtHeaterState] = useState(false);
 
+  const prevEnvRef = React.useRef('');
+
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) {
+      prevEnvRef.current = '';
+      return;
+    }
+
+    const envStr = JSON.stringify(env);
+    if (envStr !== prevEnvRef.current && Object.keys(env).length > 0) {
       setExtVentFanState(!!env.external_vent_fan);
       setExtIntFanState(!!env.external_int_fan);
       setExtHumidifierState(!!env.external_humidifier);
       setExtHeaterState(!!env.external_heater);
+      prevEnvRef.current = envStr;
     }
   }, [isOpen, env]);
 
   const handleSave = () => {
-    sendCloudCommand(`set para ext_vfan active ${extVentFanState ? 1 : 0}`);
-    sendCloudCommand(`set para ext_ifan active ${extIntFanState ? 1 : 0}`);
-    sendCloudCommand(`set para ext_hum active ${extHumidifierState ? 1 : 0}`);
-    sendCloudCommand(`set para ext_heat active ${extHeaterState ? 1 : 0}`);
+    apiCall('/api/setParameter', { method: 'POST', body: `target=ext_vfan&param=active&value=${extVentFanState ? 1 : 0}` });
+    apiCall('/api/setParameter', { method: 'POST', body: `target=ext_ifan&param=active&value=${extIntFanState ? 1 : 0}` });
+    apiCall('/api/setParameter', { method: 'POST', body: `target=ext_hum&param=active&value=${extHumidifierState ? 1 : 0}` });
+    apiCall('/api/setParameter', { method: 'POST', body: `target=ext_heat&param=active&value=${extHeaterState ? 1 : 0}` });
     onClose();
   };
 
   const handleSystemMode = (mode: 'AUTO' | 'MANUAL') => {
-    // Usually handled by UI, but here we can toggle
     sendCloudCommand(`set mode ${mode}`);
-    onClose(); // Optional
+    onClose();
   };
 
   const manualToggle = (actor: string, on: boolean) => {
-    sendCloudCommand(`set force ${actor} ${on ? 1 : 0}`);
+    // Mapping for controlActor uses actor and state
+    apiCall('/api/controlActor', { method: 'POST', body: `actor=${actor}&state=${on ? 255 : 0}` });
   };
 
   const SwitchRow = ({ label, emoji, checked, onChange }: any) => (
@@ -109,11 +118,11 @@ export default function AirActorsModal({ isOpen, onClose }: AirActorsModalProps)
               <span className="font-bold text-amber-400 block mb-1">Achtung: Automatik pausiert.</span>
               Du kannst Abluft, Umluft und Heizung manuell schalten.
               <div className="mt-3 flex flex-wrap gap-2">
-                <button onClick={() => manualToggle('vent_fan', true)} className="px-2 py-1 bg-amber-500/20 rounded border border-amber-500/30">🌬️ An</button>
-                <button onClick={() => manualToggle('vent_fan', false)} className="px-2 py-1 bg-white/10 rounded border border-white/10">🌬️ Aus</button>
+                <button onClick={() => manualToggle('fan', true)} className="px-2 py-1 bg-amber-500/20 rounded border border-amber-500/30">🌬️ An</button>
+                <button onClick={() => manualToggle('fan', false)} className="px-2 py-1 bg-white/10 rounded border border-white/10">🌬️ Aus</button>
                 
-                <button onClick={() => manualToggle('internal_fan', true)} className="px-2 py-1 bg-amber-500/20 rounded border border-amber-500/30">🌀 An</button>
-                <button onClick={() => manualToggle('internal_fan', false)} className="px-2 py-1 bg-white/10 rounded border border-white/10">🌀 Aus</button>
+                <button onClick={() => manualToggle('circulating_fan', true)} className="px-2 py-1 bg-amber-500/20 rounded border border-amber-500/30">🌀 An</button>
+                <button onClick={() => manualToggle('circulating_fan', false)} className="px-2 py-1 bg-white/10 rounded border border-white/10">🌀 Aus</button>
               </div>
             </div>
           )}

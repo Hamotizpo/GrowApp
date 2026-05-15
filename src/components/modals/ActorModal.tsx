@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Modal from './Modal';
 import { useIoTSync } from '../../context/IoTSyncContext';
+import { DurationInput } from '../ui/DurationInput';
 
 interface ActorModalProps {
   actorName: string | null;
@@ -9,7 +10,7 @@ interface ActorModalProps {
 }
 
 export default function ActorModal({ actorName, isOpen, onClose }: ActorModalProps) {
-  const { state, sendCloudCommand } = useIoTSync();
+  const { state, sendCloudCommand, apiCall } = useIoTSync();
   const [activeTab, setActiveTab] = useState('control');
 
   // Forms State
@@ -35,19 +36,30 @@ export default function ActorModal({ actorName, isOpen, onClose }: ActorModalPro
   const [limitMin, setLimitMin] = useState(0);
   const [limitMax, setLimitMax] = useState(255);
 
+  const [saveStatus, setSaveStatus] = useState<{message: string, type: 'success' | 'error'} | null>(null);
+
   // Control
   const [directPwm, setDirectPwm] = useState(0);
 
   const actorData = actorName ? state.actors[actorName] : null;
   const settings = actorData?.settings || {};
 
+  const prevSettingsRef = React.useRef('');
+
   useEffect(() => {
-    if (isOpen && actorData) {
+    if (!isOpen) {
+      prevSettingsRef.current = '';
+      return;
+    }
+
+    const settingsStr = JSON.stringify(settings);
+    if (settingsStr !== prevSettingsRef.current && actorData && Object.keys(settings).length > 0) {
       setDirectPwm(Math.round(((actorData.pwm || 0) / 255) * 100));
       setLimitMin(settings.minThreshold ?? 0);
       setLimitMax(settings.maxCap ?? 255);
+      prevSettingsRef.current = settingsStr;
     }
-  }, [isOpen, actorName]);
+  }, [isOpen, actorName, actorData, settings]);
 
   if (!actorName || !isOpen) return null;
 
@@ -75,14 +87,10 @@ export default function ActorModal({ actorName, isOpen, onClose }: ActorModalPro
     return daysArr.map(d => d ? '1' : '0').join('');
   };
 
-  const exec = (cmd: string) => {
-    sendCloudCommand(cmd);
-  };
-
   const handleDirectPwmChange = (val: number) => {
     setDirectPwm(val);
     const pwm255 = Math.round((val / 100) * 255);
-    exec(`set pwm ${actorName} ${pwm255}`);
+    apiCall('/api/controlActor', { method: 'POST', body: `actor=${actorName}&state=${pwm255}` });
   };
 
   const TabBtn = ({ id, icon, label }: any) => (
@@ -106,6 +114,49 @@ export default function ActorModal({ actorName, isOpen, onClose }: ActorModalPro
     const s = String(timeNum).padStart(4, '0');
     return `${s.slice(0, 2)}:${s.slice(2, 4)}`;
   };
+
+  const handleApplyAction = (action: string, param?: any) => {
+    apiCall('/api/resetActor', { 
+      method: 'POST', 
+      body: { actor: actorName, action, index: param } 
+    });
+  };
+
+  const Input = ({ label, type = "text", ...props }: any) => {
+    if (type === 'duration') {
+      return (
+        <div className="flex flex-col gap-1.5 w-full">
+          <label className="text-[10px] text-muted-color font-bold uppercase tracking-widest">{label}</label>
+          <DurationInput value={props.value} onChange={(val) => props.onChange({ target: { value: val } })} className="px-1" />
+        </div>
+      );
+    }
+    return (
+      <div className="flex flex-col gap-1.5 w-full">
+        <label className="text-[10px] text-muted-color font-bold uppercase tracking-widest">{label}</label>
+        <input 
+          type={type} 
+          style={type === 'time' ? { colorScheme: 'dark' } : undefined}
+          className="bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-emerald-500/50 transition-all placeholder:text-white/20"
+          {...props} 
+        />
+      </div>
+    );
+  };
+
+  const Range = ({ label, val, ...props }: any) => (
+    <div className="flex flex-col gap-1.5 w-full">
+      <label className="text-[10px] text-muted-color font-bold uppercase tracking-widest flex justify-between">
+        <span>{label}</span>
+        <span className="text-emerald-400">{val}%</span>
+      </label>
+      <input 
+        type="range" 
+        className="accent-emerald-500 py-2 w-full"
+        {...props} 
+      />
+    </div>
+  );
 
   const DaysSelector = ({ days, setDays }: any) => (
     <div className="flex flex-col gap-2">
@@ -170,52 +221,46 @@ export default function ActorModal({ actorName, isOpen, onClose }: ActorModalPro
 
           {activeTab === 'time' && (
             <div className="flex flex-col gap-4">
-              <div className="flex justify-between items-center bg-white/5 p-3 rounded-lg">
+              <div className="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/10">
                 <h4 className="font-bold flex items-center gap-2">
                   Zeitsteuerung: {settings.timeEnabled ? <span className="text-emerald-400">AKTIV</span> : <span className="text-gray-400">AUS</span>}
                 </h4>
                 <button 
-                  onClick={() => exec(settings.timeEnabled ? `cont ${actorName} dis_time` : `cont ${actorName} en_time`)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${settings.timeEnabled ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'}`}
+                  onClick={() => apiCall('/api/resetActor', { 
+                    method: 'POST', 
+                    body: `actor=${actorName}&action=${settings.timeEnabled ? 'dis_time' : 'en_time'}` 
+                  })}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${settings.timeEnabled ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'}`}
                 >
                   {settings.timeEnabled ? 'DEAKTIVIEREN' : 'AKTIVIEREN'}
                 </button>
               </div>
 
-              <div className="bg-white/5 border border-white/10 rounded-lg p-4 flex flex-col gap-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs text-gray-400 font-bold uppercase">Zeit (HH:MM)</label>
-                    <input type="time" value={timeVal} onChange={e => setTimeVal(e.target.value)} className="bg-black/40 border border-white/10 rounded px-3 py-2 text-white outline-none" />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs text-gray-400 font-bold uppercase">PWM (%) - {timePwm}%</label>
-                    <input type="range" min="0" max="100" value={timePwm} onChange={e => setTimePwm(Number(e.target.value))} className="accent-emerald-500 py-2" />
-                  </div>
+              <div className="bg-white/5 border border-white/10 rounded-xl p-5 flex flex-col gap-5 shadow-lg">
+                <div className="grid grid-cols-2 gap-5">
+                  <Input label="Zeit (HH:MM)" type="time" value={timeVal} onChange={(e: any) => setTimeVal(e.target.value)} />
+                  <Range label="PWM" val={timePwm} min="0" max="100" value={timePwm} onChange={(e: any) => setTimePwm(Number(e.target.value))} />
                 </div>
                 <DaysSelector days={timeDays} setDays={setTimeDays} />
                 <button 
-                  onClick={() => {
-                    const daysBits = getDaysStr(timeDays);
-                    if (daysBits === '0000000') return alert('Tage auswählen');
-                    const t = timeVal.replace(':', '');
-                    const p = Math.round((timePwm/100)*255);
-                    exec(`set time ${actorName} ${p} ${t} ${daysBits}`);
-                  }}
-                  className="bg-white/10 hover:bg-white/20 text-white font-bold py-2 rounded-lg text-sm transition-colors"
+                  onClick={() => apiCall('/api/addTimeEntry', { 
+                    method: 'POST', 
+                    body: `actor=${actorName}&pwm=${Math.round((timePwm/100)*255)}&time=${timeVal.replace(':', '')}&days=${getDaysStr(timeDays)}` 
+                  })}
+                  className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 rounded-xl text-sm transition-colors shadow-lg shadow-emerald-500/20"
                 >
-                  ➕ Hinzufügen
+                  ➕ Neues Zeit-Programm Hinzufügen
                 </button>
               </div>
 
               <div className="flex flex-col gap-2 mt-2 max-h-40 overflow-y-auto custom-scrollbar">
                 {(settings.timeEntries || []).map((ent: any, idx: number) => (
-                  <div key={idx} className="bg-black/30 border border-white/10 rounded-lg p-3 flex justify-between items-center text-sm">
-                    <div>
-                      <div>Zeit: <strong>{formatTime(ent.time)}</strong> | PWM: {ent.pwmValue ?? ent.pwm}</div>
-                      <div className="text-xs text-gray-400">Tage: {formatDays(ent.weekdays ?? ent.days)}</div>
+                  <div key={idx} className="bg-black/40 border border-white/10 rounded-xl p-4 flex justify-between items-center text-sm shadow-xl">
+                    <div className="flex flex-col gap-1">
+                      <div className="text-white text-base">Zeit: <strong className="text-emerald-400">{formatTime(ent.time)}</strong> &bull; PWM: <strong className="text-emerald-400">{ent.pwmValue ?? ent.pwm}</strong></div>
+                      <div className="text-xs text-gray-400 uppercase tracking-widest font-bold">Tage: {formatDays(ent.weekdays ?? ent.days)}</div>
                     </div>
-                    <button onClick={() => exec(`cont ${actorName} del_time ${idx}`)} className="text-red-400 hover:bg-red-500/10 px-2 py-1 rounded">Löschen</button>
+                    <button onClick={() => handleApplyAction('del_time', idx)} className="text-red-400 hover:bg-red-500/20 px-3 py-2 rounded-lg font-bold transition-colors">Löschen</button>
                   </div>
                 ))}
               </div>
@@ -224,49 +269,35 @@ export default function ActorModal({ actorName, isOpen, onClose }: ActorModalPro
 
           {activeTab === 'interval' && (
             <div className="flex flex-col gap-4">
-              <div className="flex justify-between items-center bg-white/5 p-3 rounded-lg">
+              <div className="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/10">
                 <h4 className="font-bold flex items-center gap-2">
                   Intervall: {settings.intervalEnabled ? <span className="text-emerald-400">AKTIV</span> : <span className="text-gray-400">AUS</span>}
                 </h4>
                 <button 
-                  onClick={() => exec(settings.intervalEnabled ? `cont ${actorName} dis_inter` : `cont ${actorName} en_inter`)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${settings.intervalEnabled ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'}`}
+                  onClick={() => apiCall('/api/resetActor', { 
+                    method: 'POST', 
+                    body: `actor=${actorName}&action=${settings.intervalEnabled ? 'dis_inter' : 'en_inter'}` 
+                  })}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${settings.intervalEnabled ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'}`}
                 >
                   {settings.intervalEnabled ? 'DEAKTIVIEREN' : 'AKTIVIEREN'}
                 </button>
               </div>
 
-              <div className="bg-white/5 border border-white/10 rounded-lg p-4 flex flex-col gap-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs text-gray-400 font-bold uppercase">An-Phase (d:h:m:s)</label>
-                    <input type="time" step="1" value={intervalOn} onChange={e => setIntervalOn(e.target.value)} className="bg-black/40 border border-white/10 rounded px-3 py-2 text-white outline-none" />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs text-gray-400 font-bold uppercase">Aus-Phase (d:h:m:s)</label>
-                    <input type="time" step="1" value={intervalOff} onChange={e => setIntervalOff(e.target.value)} className="bg-black/40 border border-white/10 rounded px-3 py-2 text-white outline-none" />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs text-gray-400 font-bold uppercase">Aktiv ab (HH:MM)</label>
-                    <input type="time" value={intervalStart} onChange={e => setIntervalStart(e.target.value)} className="bg-black/40 border border-white/10 rounded px-3 py-2 text-white outline-none" />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs text-gray-400 font-bold uppercase">Aktiv bis (HH:MM)</label>
-                    <input type="time" value={intervalEnd} onChange={e => setIntervalEnd(e.target.value)} className="bg-black/40 border border-white/10 rounded px-3 py-2 text-white outline-none" />
-                  </div>
+              <div className="bg-white/5 border border-white/10 rounded-xl p-5 flex flex-col gap-5 shadow-lg">
+                <div className="grid grid-cols-2 gap-5">
+                  <Input label="An-Phase (HH:MM:SS)" type="duration" value={intervalOn} onChange={(e: any) => setIntervalOn(e.target.value)} />
+                  <Input label="Aus-Phase (HH:MM:SS)" type="duration" value={intervalOff} onChange={(e: any) => setIntervalOff(e.target.value)} />
+                  <Input label="Aktiv ab (HH:MM)" type="time" value={intervalStart} onChange={(e: any) => setIntervalStart(e.target.value)} />
+                  <Input label="Aktiv bis (HH:MM)" type="time" value={intervalEnd} onChange={(e: any) => setIntervalEnd(e.target.value)} />
                 </div>
                 <DaysSelector days={intervalDays} setDays={setIntervalDays} />
                 <button 
-                  onClick={() => {
-                    const daysBits = getDaysStr(intervalDays);
-                    if (daysBits === '0000000') return alert('Tage auswählen');
-                    const onS = parseDurToSec(intervalOn);
-                    const offS = parseDurToSec(intervalOff);
-                    const start = intervalStart.replace(':', '');
-                    const end = intervalEnd.replace(':', '');
-                    exec(`set inter ${actorName} ${onS}s ${offS}s ${start} ${end} ${daysBits}`);
-                  }}
-                  className="bg-white/10 hover:bg-white/20 text-white font-bold py-2 rounded-lg text-sm transition-colors"
+                  onClick={() => apiCall('/api/setInterval', { 
+                    method: 'POST', 
+                    body: `actor=${actorName}&on=${parseDurToSec(intervalOn)}s&off=${parseDurToSec(intervalOff)}s&start=${intervalStart.replace(':', '')}&end=${intervalEnd.replace(':', '')}&days=${getDaysStr(intervalDays)}` 
+                  })}
+                  className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 rounded-xl text-sm transition-colors shadow-lg shadow-emerald-500/20"
                 >
                   💾 Setzen
                 </button>
@@ -280,7 +311,7 @@ export default function ActorModal({ actorName, isOpen, onClose }: ActorModalPro
                       <div>An: {ent.onDuration ?? ent.on}s | Aus: {ent.offDuration ?? ent.off}s</div>
                       <div className="text-xs text-gray-400">Tage: {formatDays(ent.weekdays ?? ent.days)}</div>
                     </div>
-                    <button onClick={() => exec(`cont ${actorName} del_inter ${idx}`)} className="text-red-400 hover:bg-red-500/10 px-2 py-1 rounded">Löschen</button>
+                    <button onClick={() => handleApplyAction('del_inter', idx)} className="text-red-400 hover:bg-red-500/10 px-2 py-1 rounded">Löschen</button>
                   </div>
                 ))}
               </div>
@@ -289,27 +320,27 @@ export default function ActorModal({ actorName, isOpen, onClose }: ActorModalPro
 
           {activeTab === 'impulse' && (
             <div className="flex flex-col gap-4">
-              <div className="flex justify-between items-center bg-white/5 p-3 rounded-lg">
+              <div className="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/10">
                 <h4 className="font-bold flex items-center gap-2">
                   Impuls: {settings.impulseEnabled ? <span className="text-emerald-400">AKTIV</span> : <span className="text-gray-400">AUS</span>}
                 </h4>
                 <button 
-                  onClick={() => exec(settings.impulseEnabled ? `cont ${actorName} dis_impulse` : `cont ${actorName} en_impulse`)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${settings.impulseEnabled ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'}`}
+                  onClick={() => apiCall('/api/resetActor', { 
+                    method: 'POST', 
+                    body: `actor=${actorName}&action=${settings.impulseEnabled ? 'dis_impulse' : 'en_impulse'}` 
+                  })}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${settings.impulseEnabled ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'}`}
                 >
                   {settings.impulseEnabled ? 'DEAKTIVIEREN' : 'AKTIVIEREN'}
                 </button>
               </div>
-              <div className="bg-white/5 border border-white/10 rounded-lg p-4 flex flex-col gap-4">
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-gray-400 font-bold uppercase">Impulsdauer (HH:MM:SS)</label>
-                  <input type="time" step="1" value={impulseDur} onChange={e => setImpulseDur(e.target.value)} className="bg-black/40 border border-white/10 rounded px-3 py-2 text-white outline-none" />
-                </div>
+              <div className="bg-white/5 border border-white/10 rounded-xl p-5 flex flex-col gap-5 shadow-lg">
+                <Input label="Impulsdauer (HH:MM:SS)" type="duration" value={impulseDur} onChange={(e: any) => setImpulseDur(e.target.value)} />
                 <button 
-                  onClick={() => exec(`set impuls ${actorName} ${parseDurToSec(impulseDur)}s`)}
-                  className="bg-white/10 hover:bg-white/20 text-white font-bold py-2 rounded-lg text-sm transition-colors"
+                  onClick={() => apiCall('/api/addImpulse', { method: 'POST', body: `actor=${actorName}&duration=${parseDurToSec(impulseDur)}s` })}
+                  className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 rounded-xl text-sm transition-colors shadow-lg shadow-emerald-500/20"
                 >
-                  ➕ Setzen
+                  💾 Setzen
                 </button>
               </div>
               {settings.impulseDuration !== undefined && (
@@ -322,25 +353,25 @@ export default function ActorModal({ actorName, isOpen, onClose }: ActorModalPro
 
           {activeTab === 'soft' && (
             <div className="flex flex-col gap-4">
-              <div className="flex justify-between items-center bg-white/5 p-3 rounded-lg">
+              <div className="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/10">
                 <h4 className="font-bold flex items-center gap-2">
                   Softstart: {settings.softStartEnabled ? <span className="text-emerald-400">AKTIV</span> : <span className="text-gray-400">AUS</span>}
                 </h4>
                 <button 
-                  onClick={() => exec(`set soft ${actorName} ${settings.softStartEnabled ? 'off' : 'on'} 10s`)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${settings.softStartEnabled ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'}`}
+                  onClick={() => apiCall('/api/setSoftStart', { 
+                    method: 'POST', 
+                    body: `actor=${actorName}&enable=${settings.softStartEnabled ? '0' : '1'}&duration=10s` 
+                  })}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${settings.softStartEnabled ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'}`}
                 >
                   {settings.softStartEnabled ? 'DEAKTIVIEREN' : 'AKTIVIEREN'}
                 </button>
               </div>
-              <div className="bg-white/5 border border-white/10 rounded-lg p-4 flex flex-col gap-4">
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-gray-400 font-bold uppercase">Dauer (HH:MM:SS)</label>
-                  <input type="time" step="1" value={softDur} onChange={e => setSoftDur(e.target.value)} className="bg-black/40 border border-white/10 rounded px-3 py-2 text-white outline-none" />
-                </div>
+              <div className="bg-white/5 border border-white/10 rounded-xl p-5 flex flex-col gap-5 shadow-lg">
+                <Input label="Dauer (HH:MM:SS)" type="duration" value={softDur} onChange={(e: any) => setSoftDur(e.target.value)} />
                 <button 
-                  onClick={() => exec(`set soft ${actorName} on ${parseDurToSec(softDur)}s`)}
-                  className="bg-white/10 hover:bg-white/20 text-white font-bold py-2 rounded-lg text-sm transition-colors"
+                  onClick={() => apiCall('/api/setSoftStart', { method: 'POST', body: `actor=${actorName}&enable=1&duration=${parseDurToSec(softDur)}s` })}
+                  className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 rounded-xl text-sm transition-colors shadow-lg shadow-emerald-500/20"
                 >
                   💾 Setzen
                 </button>
@@ -355,25 +386,41 @@ export default function ActorModal({ actorName, isOpen, onClose }: ActorModalPro
 
           {activeTab === 'limits' && (
             <div className="flex flex-col gap-4">
-              <div className="bg-white/5 border border-white/10 rounded-lg p-4 flex flex-col gap-4">
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-gray-400 font-bold uppercase">Min-Schwelle (0-255)</label>
-                  <input type="number" min="0" max="255" value={limitMin} onChange={e => setLimitMin(Number(e.target.value))} className="bg-black/40 border border-white/10 rounded px-3 py-2 text-white outline-none" />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-gray-400 font-bold uppercase">Max-Kappung (0-255)</label>
-                  <input type="number" min="0" max="255" value={limitMax} onChange={e => setLimitMax(Number(e.target.value))} className="bg-black/40 border border-white/10 rounded px-3 py-2 text-white outline-none" />
-                </div>
+              <div className="bg-white/5 border border-white/10 rounded-xl p-5 flex flex-col gap-5 shadow-lg">
+                <Input label="Min-Schwelle (0-255)" type="number" min="0" max="255" value={limitMin} onChange={(e: any) => setLimitMin(Number(e.target.value))} />
+                <Input label="Max-Kappung (0-255)" type="number" min="0" max="255" value={limitMax} onChange={(e: any) => setLimitMax(Number(e.target.value))} />
                 
-                <p className="text-xs text-gray-400 mt-2">
+                <p className="text-xs text-gray-400">
                   Beim Einschalten wird die Min-Schwelle gesetzt, Softstart fährt dann linear zum Max-Cap.
                 </p>
 
+                {saveStatus && (
+                  <div className={`p-3 rounded-lg text-xs font-bold text-center ${saveStatus.type === 'success' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'}`}>
+                    {saveStatus.message}
+                  </div>
+                )}
+                
                 <button 
-                  onClick={() => exec(`set limits ${actorName} ${limitMin} ${limitMax}`)}
-                  className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/30 font-bold py-2 rounded-lg text-sm transition-colors"
+                  onClick={async () => {
+                    try {
+                      await apiCall('/api/setActorLimits', { 
+                        method: 'POST', 
+                        body: { 
+                          actor: actorName, 
+                          min_threshold: Number(limitMin), 
+                          max_cap: Number(limitMax) 
+                        } 
+                      });
+                      setSaveStatus({ message: `Limits für ${humanizeActor(actorName || '')} erfolgreich gesendet!`, type: 'success' });
+                      setTimeout(() => setSaveStatus(null), 3000);
+                    } catch (err: any) {
+                      setSaveStatus({ message: `Fehler: ${err.message}`, type: 'error' });
+                      setTimeout(() => setSaveStatus(null), 3000);
+                    }
+                  }}
+                  className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 rounded-xl px-6 py-3 w-full transition-colors font-bold text-sm"
                 >
-                  💾 Setzen
+                  💾 Limits Übernehmen
                 </button>
               </div>
             </div>
@@ -385,7 +432,7 @@ export default function ActorModal({ actorName, isOpen, onClose }: ActorModalPro
               <button 
                 onClick={() => {
                   if (confirm('Sicher, dass alle Funktionen gelöscht werden sollen?')) {
-                    exec(`cont ${actorName} clear`);
+                    apiCall('/api/resetActor', { method: 'POST', body: `actor=${actorName}&action=clear` });
                   }
                 }}
                 className="bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500/30 px-6 py-3 rounded-xl font-bold transition-colors"

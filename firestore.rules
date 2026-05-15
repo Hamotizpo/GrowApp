@@ -1,0 +1,105 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Phase 4: Validation Blueprints
+    function isValidPlant(data) {
+      return data.userId == request.auth.uid
+        && data.species is string && data.species.size() <= 100
+        && data.moisture is number && data.moisture >= 0 && data.moisture <= 100
+        && data.sunlight in ['Low Light', 'Partial Shade', 'Full Sun']
+        && data.status in ['Stable', 'Thirsty', 'Critical']
+        && (data.get('temp', 0) is number)
+        && (data.get('imageUrl', '') is string && data.get('imageUrl', '').size() <= 1000)
+        && (data.createdAt is number || data.createdAt is timestamp);
+    }
+
+    function isValidGrowthLog(data) {
+      return data.userId == request.auth.uid
+        && isValidId(data.plantId)
+        && (data.date is number || data.date is timestamp)
+        && data.note is string && data.note.size() <= 2000
+        && (data.get('height', 0) is number)
+        && (data.get('healthScore', 1) is number && data.get('healthScore', 1) >= 1 && data.get('healthScore', 1) <= 10)
+        && (data.get('imageUrl', '') is string && data.get('imageUrl', '').size() <= 1000)
+        // Verify plant ownership before allowing log creation
+        && get(/databases/$(database)/documents/plants/$(data.plantId)).data.userId == request.auth.uid;
+    }
+
+    // 1. Plants Collection
+    match /plants/{plantId} {
+      allow get: if isOwner(resource.data.userId);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      allow create: if isSignedIn() 
+        && isValidId(plantId)
+        && isValidPlant(request.resource.data)
+        && (request.resource.data.createdAt == request.time || request.resource.data.createdAt == request.time.toMillis());
+        
+      allow update: if isOwner(resource.data.userId)
+        && isValidPlant(request.resource.data)
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && (
+          // Action: Normal update
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['species', 'moisture', 'sunlight', 'status', 'temp', 'imageUrl'])
+        );
+        
+      allow delete: if isOwner(resource.data.userId);
+    }
+
+    // 2. Growth Logs Collection
+    match /growth_logs/{logId} {
+      allow get: if isOwner(resource.data.userId);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      allow create: if isSignedIn()
+        && isValidId(logId)
+        && isValidGrowthLog(request.resource.data)
+        && (request.resource.data.date == request.time || request.resource.data.date == request.time.toMillis());
+
+      allow update: if isOwner(resource.data.userId)
+        && isValidGrowthLog(request.resource.data)
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.plantId == resource.data.plantId
+        && request.resource.data.date == resource.data.date
+        && (
+          // Action: Edit log
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['note', 'height', 'healthScore', 'imageUrl'])
+        );
+
+      allow delete: if isOwner(resource.data.userId);
+    }
+    // 3. User Devices and Telemetry
+    match /users/{userId} {
+      match /devices/{deviceId} {
+        allow read, write: if isOwner(userId);
+        
+        match /telemetry/{bucket} {
+           allow read, write: if isOwner(userId);
+        }
+        
+        match /logs/{bucket} {
+           allow read, write: if isOwner(userId);
+        }
+      }
+    }
+  }
+}

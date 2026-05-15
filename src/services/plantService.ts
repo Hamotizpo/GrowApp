@@ -1,6 +1,7 @@
-import { collection, doc, addDoc, updateDoc, deleteDoc, getDocs, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, doc, addDoc, updateDoc, deleteDoc, query, where, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Plant } from '../types';
+import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 
 const PLANTS_COLLECTION = 'plants';
 
@@ -13,39 +14,38 @@ export const subscribeToPlants = (userId: string, callback: (plants: Plant[]) =>
     });
     callback(plants);
   }, (error) => {
-    console.error('Error fetching plants:', error);
+    handleFirestoreError(error, OperationType.LIST, PLANTS_COLLECTION);
   });
 };
 
-export const addPlant = async (plant: Omit<Plant, 'id'>) => {
+export const addPlant = async (plant: Omit<Plant, 'id' | 'createdAt'>) => {
   try {
     const docRef = await addDoc(collection(db, PLANTS_COLLECTION), {
       ...plant,
-      createdAt: Date.now()
+      createdAt: serverTimestamp()
     });
     return docRef.id;
   } catch (error) {
-    console.error('Error adding plant:', error);
-    throw error;
+    handleFirestoreError(error, OperationType.CREATE, PLANTS_COLLECTION);
   }
 };
 
 export const updatePlant = async (id: string, data: Partial<Plant>) => {
+  const path = `${PLANTS_COLLECTION}/${id}`;
   try {
     const docRef = doc(db, PLANTS_COLLECTION, id);
     await updateDoc(docRef, data);
   } catch (error) {
-    console.error('Error updating plant:', error);
-    throw error;
+    handleFirestoreError(error, OperationType.UPDATE, path);
   }
 };
 
 export const deletePlant = async (id: string) => {
+  const path = `${PLANTS_COLLECTION}/${id}`;
   try {
     const docRef = doc(db, PLANTS_COLLECTION, id);
     await deleteDoc(docRef);
   } catch (error) {
-    console.error('Error deleting plant:', error);
-    throw error;
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 };

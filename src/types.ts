@@ -9,3 +9,14 @@ export interface Plant {
   imageUrl?: string;
   createdAt?: number;
 }
+
+export interface GrowthLog {
+  id?: string;
+  plantId: string;
+  userId: string;
+  date: number;
+  note: string;
+  height?: number; // in cm
+  healthScore?: number; // 1-10
+  imageUrl?: string;
+}

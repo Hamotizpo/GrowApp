@@ -8,7 +8,7 @@ interface TempModalProps {
 }
 
 export default function TempModal({ isOpen, onClose }: TempModalProps) {
-  const { state, sendCloudCommand } = useIoTSync();
+  const { state, sendCloudCommand, apiCall } = useIoTSync();
   const env = state.system?.envConfig || {};
   const currentTemp = state.sensors?.temperature;
 
@@ -17,12 +17,21 @@ export default function TempModal({ isOpen, onClose }: TempModalProps) {
   const [tCri, setTCri] = useState<number | ''>('');
   const [tNd, setTNd] = useState<number | ''>('');
 
+  const prevEnvRef = React.useRef('');
+
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) {
+      prevEnvRef.current = '';
+      return;
+    }
+
+    const envStr = JSON.stringify(env);
+    if (envStr !== prevEnvRef.current && Object.keys(env).length > 0) {
       setTMin(env.minTemperature ?? env.tMin ?? 20);
       setTMax(env.maxTemperature ?? env.tMax ?? 28);
       setTCri(env.criticalTemperature ?? env.tCri ?? env.tCritic ?? 40);
       setTNd(env.tempNightDiff ?? env.tNd ?? env.tempNd ?? env.tempND ?? 0);
+      prevEnvRef.current = envStr;
     }
   }, [isOpen, env]);
 
@@ -33,14 +42,14 @@ export default function TempModal({ isOpen, onClose }: TempModalProps) {
     return Number(tMin) < Number(tMax) && Number(tMax) < Number(tCri) && nightMin < nightMax && nightMax < Number(tCri);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!isValid()) return;
     
-    // Send MQTT commands
-    sendCloudCommand(`set para min temp ${tMin}`);
-    sendCloudCommand(`set para max temp ${tMax}`);
-    sendCloudCommand(`set para critic temp ${tCri}`);
-    sendCloudCommand(`set para nightdif temp ${tNd}`);
+    // Using apiCall for centralized command generation
+    await apiCall('/api/setParameter', { method: 'POST', body: { target: 'min', param: 'temp', value: tMin } });
+    await apiCall('/api/setParameter', { method: 'POST', body: { target: 'max', param: 'temp', value: tMax } });
+    await apiCall('/api/setParameter', { method: 'POST', body: { target: 'critic', param: 'temp', value: tCri } });
+    await apiCall('/api/setParameter', { method: 'POST', body: { target: 'nightdif', param: 'temp', value: tNd } });
     
     onClose();
   };

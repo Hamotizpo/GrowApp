@@ -8,7 +8,7 @@ interface HumidityModalProps {
 }
 
 export default function HumidityModal({ isOpen, onClose }: HumidityModalProps) {
-  const { state, sendCloudCommand } = useIoTSync();
+  const { state, sendCloudCommand, apiCall } = useIoTSync();
   const env = state.system?.envConfig || {};
   const currentHumidity = state.sensors?.humidity;
 
@@ -17,12 +17,21 @@ export default function HumidityModal({ isOpen, onClose }: HumidityModalProps) {
   const [hNd, setHNd] = useState<number | ''>('');
   const [fanBlock, setFanBlock] = useState<boolean>(false);
 
+  const prevEnvRef = React.useRef('');
+
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) {
+      prevEnvRef.current = '';
+      return;
+    }
+
+    const envStr = JSON.stringify(env);
+    if (envStr !== prevEnvRef.current && Object.keys(env).length > 0) {
       setHMin(env.minHumidity ?? env.hMin ?? 40);
       setHMax(env.maxHumidity ?? env.hMax ?? 60);
       setHNd(env.humidityNightDiff ?? env.hNd ?? env.humidNd ?? env.humidND ?? 0);
       setFanBlock(!!(env.fanBlockWhenHumidifierActive ?? env.fanBlock ?? env.fBlock));
+      prevEnvRef.current = envStr;
     }
   }, [isOpen, env]);
 
@@ -33,13 +42,16 @@ export default function HumidityModal({ isOpen, onClose }: HumidityModalProps) {
     return Number(hMin) < Number(hMax) && nightMin < nightMax && nightMax <= 100;
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!isValid()) return;
     
-    sendCloudCommand(`set para min humid ${hMin}`);
-    sendCloudCommand(`set para max humid ${hMax}`);
-    sendCloudCommand(`set para nightdif humid ${hNd}`);
-    sendCloudCommand(`set para fanBlock active ${fanBlock ? 1 : 0}`);
+    // Using apiCall for centralized command generation
+    await apiCall('/api/setParameter', { method: 'POST', body: { target: 'min', param: 'humid', value: hMin } });
+    await apiCall('/api/setParameter', { method: 'POST', body: { target: 'max', param: 'humid', value: hMax } });
+    await apiCall('/api/setParameter', { method: 'POST', body: { target: 'nightdif', param: 'humid', value: hNd } });
+    
+    // Note: The ESP32 code provides a direct branch for fanBlockWhenHumidifierActive
+    await apiCall('/api/setParameter', { method: 'POST', body: { target: 'fanBlock', param: 'active', value: fanBlock ? 1 : 0 } });
     
     onClose();
   };

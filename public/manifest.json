@@ -1,0 +1,22 @@
+{
+  "name": "GrowSafe IoT Dashboard",
+  "short_name": "GrowSafe",
+  "description": "Professional Grow Room Monitoring & Automation",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#10b981",
+  "icons": [
+    {
+      "src": "https://img.icons8.com/parakeet/512/marijuana-leaf.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://img.icons8.com/parakeet/192/marijuana-leaf.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}

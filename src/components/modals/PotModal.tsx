@@ -24,36 +24,38 @@ export default function PotModal({ isOpen, onClose, index }: PotModalProps) {
     return Math.max(1, Math.min(15, v));
   };
 
+  const prevEnvRef = React.useRef('');
+
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) {
+      prevEnvRef.current = '';
+      return;
+    }
+
+    const envStr = JSON.stringify(env);
+    if (envStr !== prevEnvRef.current && Object.keys(env).length > 0) {
       setInWet(toScale15(env.soilAdcWet ?? 0) as number);
       setInMoist(toScale15(env.soilAdcMoist ?? 0) as number);
       setInDry(toScale15(env.soilAdcDry ?? 4095) as number);
+      prevEnvRef.current = envStr;
     }
   }, [isOpen, env]);
 
   const levelTxt = ["ERR", "Nass", "Feucht", "Trocken?", "Trocken"];
 
   const handleTeach = (level: string) => {
-    // teachSoil index logic: original JS had index - 1 (since 1 or 2 are passed but API uses 0 or 1)
     if (index === 1 || index === 2) {
-      // It seems we don't have a specific `sendCloudCommand` for teachSoil other than what we can map
-      // Originally: `socket.send({ cmd:'teachSoil', index: index - 1, level })`
-      // For MQTT bridge: Let's assume we have a way, or we'll send it as `cont` or custom command.
-      sendCloudCommand(`set teach soil ${index - 1} ${level}`);
-      // Toast / info that it was sent
+      sendCloudCommand(`set soilteach ${index - 1} ${level}`);
       alert(`Kalibrierung für Topf ${index} (${level}) gesendet`);
     }
   };
 
   const handleThresholdsApply = () => {
-    // The original API took 1-15 scale and set them.
-    // Original JS: `socket.send({ cmd:'setSoilThresholds', wet, moist, dry })`
-    // MQTT: `set soilth wet moist dry`
-    const w = Number(inWet) || 1;
-    const m = Number(inMoist) || 8;
+    // Note: The ESP32 backend has replaced 'set soilth' with 'set water [Threshold] [impulse] [sec]'.
+    // The previous implementation sent 3 parameters which are no longer supported. 
+    // We will send 'set water' using the dry threshold, but impulse is kept disabled for now unless configured elsewhere.
     const d = Number(inDry) || 15;
-    sendCloudCommand(`set soilth ${w} ${m} ${d}`);
+    sendCloudCommand(`set water ${d} off 0`);
     onClose();
   };
 
